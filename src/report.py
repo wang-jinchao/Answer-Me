@@ -9,13 +9,10 @@ def save(results):
         exist_ok=True
     )
 
-    filename=f"""
-reports/
-{datetime.date.today()}.json
-"""
+    filename = os.path.join("reports", f"{datetime.date.today()}.json")
 
     with open(
-        filename.strip(),
+        filename,
         "w",
         encoding="utf8"
     ) as f:
