@@ -28,6 +28,11 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Install system dependencies (tesseract)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr
+
     - name: Install
       run:
         pip install -r requirements.txt
