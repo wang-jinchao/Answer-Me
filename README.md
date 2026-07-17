@@ -1,6 +1,6 @@
 # Answer-Me Automation
 
-This repository runs simple browser automation over configured accounts and saves a daily report.
+This repository runs browser automation to perform the daily tasks on the target site and saves a daily report.
 
 Quick start
 
@@ -15,7 +15,11 @@ Quick start
    pip install -r requirements.txt
    playwright install chromium
 
-3. Run locally:
+3. Run tests:
+
+   python -m pytest tests
+
+4. Run locally:
 
    python src/main.py
 
@@ -26,7 +30,5 @@ The .github/workflows/daily.yml demonstrates running this in CI using repository
 Notes and safety
 
 - Do NOT commit real credentials. Use GitHub Secrets for CI or .env files kept out of source control when running locally.
-- The project includes a generic automation skeleton. You must implement the domain-specific steps in src/account_runner.py to match your application's selectors and flows.
+- This project now implements login + captcha handling and the daily task flows for 每日一学, 每日一看, 每日一练, and 每日一答.
 - Logging is used instead of prints; reports are saved under the `reports/` directory.
-
-If you want, this repository can be extended with unit tests and CI checks — open an issue or request and they will be added.
