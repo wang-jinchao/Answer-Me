@@ -1,0 +1,54 @@
+name: Daily Automation
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+
+  workflow_dispatch:
+
+jobs:
+  automation:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        python-version:
+          - "3.11"
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install
+      run:
+        pip install -r requirements.txt
+
+    - name: Install Browser
+      run:
+        playwright install chromium
+
+    - name: Run
+      env:
+        ACCOUNTS_JSON:
+          ${{ secrets.ACCOUNTS_JSON }}
+        TARGET_URL:
+          ${{ secrets.TARGET_URL }}
+
+      run:
+        python src/main.py
+
+    - name: Upload Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: reports
+        path: reports/
