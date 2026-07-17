@@ -34,7 +34,7 @@ jobs:
 
     - name: Install Browser
       run:
-        playwright install chromium
+        python -m playwright install chromium
 
     - name: Run
       env:
