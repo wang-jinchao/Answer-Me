@@ -5,3 +5,4 @@ pydantic
 pycryptodome
 pillow
 pytesseract
+pytest
