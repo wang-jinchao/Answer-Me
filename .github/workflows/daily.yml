@@ -1,6 +1,9 @@
 name: Daily Automation
 
 on:
+  push:
+    branches:
+      - agents/additional-questions-discussion
   schedule:
     - cron: "0 1 * * *"
 
