@@ -2,3 +2,6 @@ playwright
 requests
 python-dotenv
 pydantic
+pycryptodome
+pillow
+pytesseract
