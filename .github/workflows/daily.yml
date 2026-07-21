@@ -1,0 +1,73 @@
+name: Daily Automation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  automation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browser
+        run: playwright install chromium
+
+      - name: Run
+        env:
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          NAME: ${{ secrets.NAME }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+          HOMEPAGE_URL: ${{ secrets.HOMEPAGE_URL }}
+        run: python src/main.py
+
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: reports/
+
+      - name: Notify iPhone (Bark) & WeChat (Server 酱)
+        if: always()
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          REP=$(ls -t reports/*.md 2>/dev/null | head -1 || true)
+          if [ -z "$REP" ]; then
+            SUMMARY_MD="未生成报告（任务可能未成功运行）"
+            SUMMARY_TXT="$SUMMARY_MD"
+          else
+            SUMMARY_MD=$(python3 -c "
+          import re
+          txt=open('$REP', encoding='utf-8').read()
+          m=re.search(r'## 总览(.*?)\n---', txt, re.S)
+          body=m.group(1).strip() if m else txt[:500]
+          print(body)
+          " || echo "报告解析失败")
+            SUMMARY_TXT=$(printf '%s' "$SUMMARY_MD" | sed -e 's/\*\*//g' -e 's/^#\+ *//')
+          fi
+          TITLE="upfit 每日任务"
+          if [ -n "$BARK_URL" ]; then
+            curl -s -X POST "$BARK_URL" \
+              --data-urlencode "title=$TITLE" \
+              --data-urlencode "body=$SUMMARY_TXT" || true
+          fi
+          if [ -n "$SERVERCHAN_KEY" ]; then
+            curl -s -G "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+              --data-urlencode "title=$TITLE" \
+              --data-urlencode "desp=$SUMMARY_MD" || true
+          fi
