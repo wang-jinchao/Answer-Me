@@ -481,6 +481,32 @@ def _skip_if_no_attempts(page):
     return False
 
 
+def _read_quiz_progress(page):
+    """Parse '第 N 题 / 共 M 题' from the visible question header.
+
+    Returns (current_index, total), both 1-based / total count or None when not
+    parseable. Used to detect mid-quiz skips (e.g. a double 'next' click that
+    advances two questions at once, silently dropping a question).
+    """
+    try:
+        txt = page.evaluate(
+            "() => {"
+            " const sels=['.question-title','.question','.tit','.title','.question-text','.question-header','h2','h3'];"
+            " for (const s of sels){ const el=document.querySelector(s); if(el && el.innerText && el.innerText.trim()) return el.innerText; }"
+            " return '';"
+            "}"
+        )
+    except Exception:
+        return None, None
+    if not txt:
+        return None, None
+    m = re.search(r'第\s*(\d+)\s*题', txt)
+    t = re.search(r'共\s*(\d+)\s*题', txt)
+    cur = int(m.group(1)) if m else None
+    tot = int(t.group(1)) if t else None
+    return cur, tot
+
+
 def _run_quiz(page, task_label, max_questions, homepage_url):
     details = {
         'status': 'skipped',
@@ -549,6 +575,10 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
         question_record['selected_uuid'] = correct['uuid']
         details['questions'].append(question_record)
         details['answered'] += 1
+        logger.info('%s 作答: %s | 正确uuid=%s 点击=%s',
+                    task_label,
+                    (summary.get('question') or '').strip().replace('\n', ' ')[:80],
+                    correct['uuid'], clicked)
 
         if not clicked:
             details['status'] = 'failed'
@@ -558,10 +588,22 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
             return details
 
 
+        # 防跳题：先记录作答前题号；点“确定/确认”锁定答案（该按钮可能直接前进，
+        # 也可能仅弹解析）。仅当它未使题目前进时才再点“下一题/提交/完成”，
+        # 避免一次循环推进两题而静默漏掉中间一题。
+        before_cur, _ = _read_quiz_progress(page)
         _click_button_by_text(page, ['确定', '确认'])
-        time.sleep(0.8)
-        _click_button_by_text(page, ['下一题', '提交', '完成'])
+        time.sleep(0.6)
+        mid_cur, _ = _read_quiz_progress(page)
+        if mid_cur is None or mid_cur == before_cur:
+            _click_button_by_text(page, ['下一题', '提交', '完成'])
         time.sleep(1.2)
+        after_cur, _ = _read_quiz_progress(page)
+        if before_cur is not None and after_cur is not None and after_cur > before_cur + 1:
+            logger.warning('%s 检测到跳题：第%d题作答后直接到第%d题，中间第%d题被跳过',
+                           task_label, before_cur, after_cur, before_cur + 1)
+        elif before_cur is not None and after_cur is not None and after_cur == before_cur:
+            logger.warning('%s 第%d题作答后题号未推进（可能卡在解析过渡页）', task_label, before_cur)
 
 
         cur_q = (summary.get('question') or '').strip()
