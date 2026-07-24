@@ -45,12 +45,7 @@ HOMEPAGE_URL = <首页地址>
 
 **每日一走（可选，仅特定账号需要）：** 在对应账号对象里追加以下**静态字段**即可启用，未配置的账号自动跳过、不影响答题。
 ```
-ACCOUNTS_JSON = [{
-  "name":"王晋超","username":"<账号>","password":"<密码>",
-  "openid":"<微信openId>", "unionid":"<微信unionid>",
-  "walk_name":"王晋超",
-  "walk_step": 11000
-}]
+
 ```
 - 每日一走走**微信小程序 liteapp 接口（openId 体系）**，与 Web 答题是两套体系。
 - **写入闸门 = `usrreg` 建立的同一 PHPSESSID 会话**，不依赖 `decrypt`、不需要 `enc/iv/key`（decrypt 仅回读 30 天历史，站点维护中只阻断历史回读、不阻断写入）。因此无需在 Secret 里配置这三个值，CI 配好 `openid/unionid/walk_name` 即可自动写入。
