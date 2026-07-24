@@ -105,7 +105,8 @@ def cmd_sync(repo=None):
         print("[同步] 正在推送到 GitHub Secret: ACCOUNTS_JSON ...")
         try:
             content = ACCOUNTS_FILE.read_text(encoding="utf-8")
-            subprocess.run(cmd, input=content, text=True, check=True)
+            # 显式用 UTF-8 写 stdin，避免 Windows 下默认 GBK 导致 BOM/中文 UnicodeEncodeError
+            subprocess.run(cmd, input=content, encoding="utf-8", check=True)
             print("[完成] Secret 已更新。GitHub Action 下次运行将使用最新账号列表。")
             return
         except subprocess.CalledProcessError as e:
