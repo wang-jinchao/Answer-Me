@@ -48,8 +48,8 @@ HOMEPAGE_URL = <首页地址>
 ACCOUNTS_JSON = [{
   "name":"王晋超","username":"<账号>","password":"<密码>",
   "openid":"<微信openId>", "unionid":"<微信unionid>",
-  "walk_name":"王晋超",                       # 目标绑定人中文名（启用 walk 时必填，写前校验防误写，唯一绑定依据）
-  "walk_step": 11000                          # 今日目标步数（可选；[10000,12000] 内有效，越界/缺省则用区间随机）
+  "walk_name":"王晋超",
+  "walk_step": 11000
 }]
 ```
 - 每日一走走**微信小程序 liteapp 接口（openId 体系）**，与 Web 答题是两套体系。
