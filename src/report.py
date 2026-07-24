@@ -4,14 +4,18 @@ import json
 import os
 
 
-TASK_ORDER = ("login", "daily_learn", "daily_view", "daily_practice", "daily_answer")
+TASK_ORDER = ("login", "daily_learn", "daily_view", "daily_practice", "daily_answer", "daily_walk")
 _TASK_LABELS = {
     "login": "登录",
     "daily_learn": "每日一学",
     "daily_view": "每日一看",
     "daily_practice": "每日一练",
     "daily_answer": "每日一答",
+    "daily_walk": "每日一走",
 }
+
+# 每日一走走独立 liteapp 接口，并非所有账号都配置；统计"答题完成数"分母时只算 Web 四项。
+WEB_TASK_ORDER = ("daily_learn", "daily_view", "daily_practice", "daily_answer")
 
 
 def _task_line(task_result):
@@ -22,6 +26,13 @@ def _task_line(task_result):
         extra = ""
         if "answered" in task_result:
             extra = f"（答对记录 {task_result['answered']} 题）"
+        if "before_step" in task_result or "today_walk_score" in task_result:
+            b, a = task_result.get("before_step"), task_result.get("after_step")
+            if b is not None or a is not None:
+                extra = f"（步数 {b} → {a}）"
+            ws = task_result.get("today_walk_score")
+            if ws is not None:
+                extra += f"，今日得分 +{ws}（每日运动+步数达标）"
         return f"- 状态：**完成** ✅ {extra}"
     if status == "skipped":
         return "- 状态：跳过 ⚪"
@@ -32,9 +43,14 @@ def _task_line(task_result):
 
 
 def _account_verdict(tasks):
+    """按 Web 答题四项统计完成度；每日一走作为独立可选任务单独计入 fail（若失败）。
+
+    返回 (done, skip, fail, failed_items)，其中 done/skip/fail 仅覆盖 WEB_TASK_ORDER，
+    便于速览显示「完成 X/4」；walk 失败会在 failed_items 中体现但不影响分母。
+    """
     done = skip = fail = 0
     failed_items = []
-    for key in TASK_ORDER:
+    for key in WEB_TASK_ORDER:
         t = tasks.get(key)
         label = _TASK_LABELS.get(key, key)
         if not isinstance(t, dict):
@@ -50,6 +66,14 @@ def _account_verdict(tasks):
             fail += 1
             reason = t.get("reason") or t.get("error") or "失败"
             failed_items.append((label, reason))
+
+    # 每日一走（可选）：失败计入总 fail 与 failed_items，但不改变答题分母
+    walk = tasks.get("daily_walk")
+    if isinstance(walk, dict) and walk.get("status") not in ("done", "skipped"):
+        fail += 1
+        reason = walk.get("reason") or walk.get("error") or "失败"
+        failed_items.append((_TASK_LABELS.get("daily_walk", "每日一走"), reason))
+
     return done, skip, fail, failed_items
 
 
@@ -82,9 +106,19 @@ def _build_summary(results):
                 quick_lines.append(f"- {user}：❌ 登录/执行失败 — {err}{gain_txt}")
             else:
                 failed_str = "；".join(f"{lbl}：{rsn}" for lbl, rsn in failed_items) or "未知错误"
-                quick_lines.append(f"- {user}：❌ 有失败（完成 {done}/5）— {failed_str}{gain_txt}")
+                quick_lines.append(f"- {user}：❌ 有失败（答题 {done}/4）— {failed_str}{gain_txt}")
         else:
-            quick_lines.append(f"- {user}：✅ 完整（完成 {done}/5，跳过 {skip}）{gain_txt}")
+            walk = tasks.get("daily_walk")
+            walk_txt = ""
+            if isinstance(walk, dict):
+                ws = walk.get("status")
+                if ws == "done":
+                    walk_txt = "，每日一走✅"
+                elif ws == "skipped":
+                    walk_txt = "，每日一走⚪(跳过)"
+                else:
+                    walk_txt = "，每日一走❌"
+            quick_lines.append(f"- {user}：✅ 完整（答题 {done}/4，跳过 {skip}）{walk_txt}{gain_txt}")
 
     if total_accounts == 0:
         overall = "⚠️ 无账号数据"
@@ -145,6 +179,15 @@ def save(results):
 
             if key == "daily_learn" and isinstance(tasks[key], dict) and "api_result" in tasks[key]:
                 lines.append(f"  - API 返回：{tasks[key]['api_result']}")
+            if key == "daily_walk" and isinstance(tasks[key], dict):
+                wk = tasks[key]
+                if wk.get("bound_name") is not None:
+                    lines.append(f"  - 绑定人：{wk.get('bound_name')}")
+                if wk.get("before_step") is not None or wk.get("after_step") is not None:
+                    lines.append(f"  - 步数：{wk.get('before_step')} → {wk.get('after_step')}")
+                motion, reach, total = wk.get("motion_score"), wk.get("reach_score"), wk.get("today_walk_score")
+                if total is not None:
+                    lines.append(f"  - 今日得分汇总：每日运动 {motion} + 步数达标 {reach} = **+{total}**（正常应为 +10）")
         if r.get("error"):
             lines.append(f"- 错误：{r['error']}")
         lines.append("")

@@ -35,7 +35,17 @@ def _normalize_account(raw, idx):
             f"ACCOUNTS_JSON 第 {idx} 个账号(name={name!r}) 配置无效：" + "；".join(problems)
             + f"。原始字段：{list(raw.keys())}"
         )
-    return {"name": name, "username": username, "password": password}
+    # 每日一走（可选）：openid/unionid 成对出现，有 openid 即启用；walk_name 为目标绑定人
+    # （防误写校验，启用 walk 时事实必填）；walk_step 为今日目标步数（可选，[10000,12000] 内
+    # 生效否则随机）。注意：微信运动加密包 walk_enc/walk_iv/walk_key 属「会话级动态运行时输入」，
+    # 每次从微信小程序实时请求抓取，**不放在静态 ACCOUNTS_JSON**——由运行时环境变量
+    # WALK_ENC/WALK_IV/WALK_KEY 注入（见 account_runner / walk.run_walk 参数），避免写死失效。
+    walk_fields = ("openid", "unionid", "walk_name", "walk_step")
+    acc = {"name": name, "username": username, "password": password}
+    for wf in walk_fields:
+        if wf in raw and str(raw[wf]).strip() != "":
+            acc[wf] = raw[wf]
+    return acc
 
 
 def load_accounts():

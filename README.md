@@ -1,6 +1,6 @@
 # Answer-Me
 
-自动完成 upfitapp.com 每日任务（每日一学 / 每日一看 / 每日一练 / 每日一答）并汇总积分报告。
+自动完成 upfitapp.com 每日任务（每日一学 / 每日一看 / 每日一练 / 每日一答，**以及可选的每日一走步数同步**）并汇总积分报告。
 
 基于 **Python + Playwright**，在 GitHub Actions 上运行，由 **cron-job.org** 精确触发定时任务。
 
@@ -19,7 +19,8 @@
     ├── browser.py                # Playwright 启动 + 每账号独立隔离
     ├── account_runner.py         # 登录 + 四环节 + 单账号循环（L685 = 登录失败）
     ├── main.py                   # 入口：读账号 → 并发跑 → 生成报告
-    └── report.py                 # JSON + Markdown 报告（含总览判定）
+    ├── report.py                 # JSON + Markdown 报告（含总览判定）
+    └── walk.py                   # 每日一走 liteapp 步数同步（openId 体系，可选任务）
 ```
 
 ## 1. 配置 Secrets
@@ -41,6 +42,23 @@ HOMEPAGE_URL = <首页地址>
 ```
 
 > ⚠️ **字段名必须是 `username` / `password`**（别名 `user`/`account`、`pass`/`pwd` 也接受）。写错会导致取到空值、登录失败，报错 `account_runner.py#L685 Login could not be confirmed`。
+
+**每日一走（可选，仅特定账号需要）：** 在对应账号对象里追加以下**静态字段**即可启用，未配置的账号自动跳过、不影响答题。
+```
+ACCOUNTS_JSON = [{
+  "name":"王晋超","username":"<账号>","password":"<密码>",
+  "openid":"<微信openId>", "unionid":"<微信unionid>",
+  "walk_name":"王晋超",                       # 目标绑定人中文名（启用 walk 时必填，写前校验防误写，唯一绑定依据）
+  "walk_step": 11000                          # 今日目标步数（可选；[10000,12000] 内有效，越界/缺省则用区间随机）
+}]
+```
+- 每日一走走**微信小程序 liteapp 接口（openId 体系）**，与 Web 答题是两套体系。
+- **微信运动加密包（enc/iv/key）不放在 ACCOUNTS_JSON**——它是会话级动态数据，每次从微信小程序实时请求抓取，由**运行时环境变量 `WALK_ENC` / `WALK_IV` / `WALK_KEY`** 注入（Secret 或 workflow 环境变量）。写死在静态配置既无意义又很快失效。未注入时 `run_walk` 标 `skipped`（不写步数），不影响其他任务。
+- **执行顺序**：先 `run_walk` 写步数 → 再读 histscore 取今日「每日运动 + 步数达标」求和（**正常 +10**），写入报告便于核对。
+- **步数规则**：只同步**当天**数据；步数落在 **[10000, 12000] 随机**（配置 `walk_step` 在该区间内才生效，否则随机）；每天**只执行一次**（每次运行都执行写步数，靠递增/当天覆盖天然幂等）。
+- **不验证写入结果**：uploadstep 调用后即标记完成（不强制复核落库），符合"只同步、不校验"诉求。
+- **绑定校验只用 `walk_name`**：写前 `index.userName` 必须含 `walk_name` 才写，否则**立即中止、绝不误写**到错误账号（与账号显示名 `name` 无关）。
+- 静态 walk 字段（openid/unionid/walk_name/walk_step）只放 Secret，绝不写进仓库代码；动态 enc/iv/key 走独立 Secret。
 
 ## 2. 本地管理账号（推荐做法）
 

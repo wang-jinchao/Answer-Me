@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 import traceback
@@ -12,6 +13,7 @@ from utils import (
     aes_encrypt_for_frontend,
     solve_numeric_captcha_from_cookies,
 )
+from walk import run_walk
 
 logger = logging.getLogger(__name__)
 
@@ -806,6 +808,41 @@ def _verify_task_via_histscore(rows, task_key, today_mmdd):
     return {'done': False}
 
 
+def _parse_score(raw):
+    """把 histscore 的得分串（如 '+10' / '10' / '10分'）转成 int；失败返回 None。"""
+    if raw is None:
+        return None
+    s = str(raw).replace('分', '').strip().lstrip('+')
+    try:
+        return int(s)
+    except ValueError:
+        try:
+            return int(float(s))
+        except ValueError:
+            return None
+
+
+def _read_walk_score(rows, today_mmdd):
+    """从 histscore 提取今日「每日运动」「步数达标」得分，用于每日一走汇总。
+
+    正常情况两者之和应为 +10。匹配规则：行的时间以今日开头，且
+    其「任务名(span[1])」或「类别(span[0])」包含 '每日运动' / '步数达标' 关键字。
+    返回 {motion, reach, total, has_both}。
+    """
+    motion = reach = None
+    for row in rows:
+        if not (row.get('time') or '').startswith(today_mmdd):
+            continue
+        nm = row.get('name', '') or ''
+        ct = row.get('cat', '') or ''
+        if motion is None and ('每日运动' in nm or '每日运动' in ct):
+            motion = _parse_score(row.get('score'))
+        elif reach is None and ('步数达标' in nm or '步数达标' in ct):
+            reach = _parse_score(row.get('score'))
+    total = (motion or 0) + (reach or 0)
+    return {'motion': motion, 'reach': reach, 'total': total, 'has_both': motion is not None and reach is not None}
+
+
 def _verify_all_tasks(page, result, homepage_url=None):
     """用积分明细页交叉校验四个任务今日是否已完成（权威信号）。
 
@@ -1091,6 +1128,40 @@ def run_account(account, url, timeout: int = 30):
 
             # 用积分明细页交叉校验四个任务今日是否完成（权威信号：修复每日一学假阴性/假阳性）
             _verify_all_tasks(page, result, url)
+
+            # 每日一走：独立于 Web 答题体系，走微信小程序 liteapp openId 接口。
+            # 执行顺序：① 先 run_walk 执行步数写入；② 再读 histscore 计算「每日运动+步数达标」得分汇总。
+            # 微信运动加密包（enc/iv/key）为运行时注入（环境变量 WALK_ENC/WALK_IV/WALK_KEY），
+            # 不写进静态 ACCOUNTS_JSON。仅当账号配置了 openid 才执行；否则标 skipped。
+            walk_result = {}
+            if account.get("openid"):
+                logger.info("账号 %s 配置了 openid，执行每日一走（先写步数，后读 histscore 汇分）",
+                            account.get("name") or account.get("username"))
+                # 运行时加密包：优先环境变量，不存在则为 None -> run_walk 内部标 skipped
+                walk_enc = os.environ.get("WALK_ENC")
+                walk_iv = os.environ.get("WALK_IV")
+                walk_key = os.environ.get("WALK_KEY")
+                try:
+                    wk = run_walk(account, enc=walk_enc, iv=walk_iv, key=walk_key)
+                except Exception as e:
+                    logger.exception("每日一走 run_walk 异常：%s", e)
+                    wk = {"status": "failed", "reason": f"run_walk 异常：{e}"}
+                # ② 后读 histscore：计算今日「每日运动 + 步数达标」得分汇总（正常 +10）
+                try:
+                    wrows = _read_histscore_rows(page, url)
+                    wscore = _read_walk_score(wrows, today_mmdd)
+                    wk["motion_score"] = wscore.get("motion")
+                    wk["reach_score"] = wscore.get("reach")
+                    wk["today_walk_score"] = wscore.get("total")
+                except Exception as e:
+                    logger.warning("每日一走 读 histscore 得分汇总失败：%s", e)
+                walk_result = wk
+            else:
+                walk_result = {
+                    "status": "skipped",
+                    "reason": "账号未配置 openid，跳过每日一走",
+                }
+            result["tasks"]["daily_walk"] = walk_result
 
             page.goto(url, timeout=timeout * 1000)
             _wait_for_reload(page, timeout=10000)
