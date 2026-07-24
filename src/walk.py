@@ -169,7 +169,8 @@ def run_walk(account: dict, enc: str = None, iv: str = None, key: str = None) ->
         logger.warning("每日一走 绑定漂移：期望 %s 实际 %s，中止防误写", target_name, bound)
         return result
 
-    # ② decrypt 取真实 30 天历史（解锁写入 + 拿到今天存储值）
+    # ② decrypt 解锁写入（写门禁：跳过 decrypt 则 uploadstep 返回 true 但不落库，属假成功）
+    # 注意：此处仅用 decrypt 解锁写入权限，不再使用其返回的 30 天历史。
     try:
         dec = _decrypt(opener, enc, iv, key)
     except Exception as e:
@@ -178,32 +179,21 @@ def run_walk(account: dict, enc: str = None, iv: str = None, key: str = None) ->
     if "_raw" in dec:
         result["reason"] = f"decrypt 返回非 JSON（可能站点维护中）：{str(dec['_raw'])[:80]}"
         return result
-    history = dec.get("rtn", {}).get("stepInfoList") or dec.get("rtn", {}).get("stepInfo") or []
-    if not history:
-        result["reason"] = "decrypt 未返回步数历史，无法安全只改今天，中止"
-        return result
 
-    # 决定今日目标步数：
-    # - 优先用配置的 walk_step，但必须落在 [WALK_STEP_MIN, WALK_STEP_MAX] 区间内，否则用区间内随机；
-    # - 用户要求：每天只执行一次、只同步当天数据、步数落在区间 [10000,12000] 随机。
+    # 决定今日目标步数：优先用配置的 walk_step，但须落在 [WALK_STEP_MIN, WALK_STEP_MAX]；否则区间随机。
+    # 用户要求：每天只执行一次、只同步当天、步数落在 [10000,12000] 随机。
     current_step = idx.get("userStep") or 0
     target = _resolve_target_step(walk_step)
     result["target_step"] = target
 
-    # 只改今天那一项（区间判定：用北京时间 0 点 ± 半天，避免跨日边界误判）
+    # 只传今天这一条：每次运行仅提交「当天 = 目标步数」的单条记录。
+    # 用户已确认：不在意后端是合并还是覆盖历史，只要今天这条能传上去即可（已清理 30 天历史合并逻辑）。
     tz = _today_zero_ts_east8()
-    found = False
-    for item in history:
-        if abs(int(item.get("timestamp", 0)) - tz) < 86400:
-            item["step"] = target
-            found = True
-            break
-    if not found:
-        history.append({"timestamp": tz, "step": target})
+    step_info = [{"timestamp": tz, "step": target}]
 
     # ③ uploadstep（用户要求：不验证是否写入成功，调后即标记 done）
     try:
-        up = _uploadstep(opener, openid, history)
+        up = _uploadstep(opener, openid, step_info)
     except Exception as e:
         result["reason"] = f"uploadstep 失败：{e}"
         return result

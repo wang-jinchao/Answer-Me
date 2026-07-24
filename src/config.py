@@ -44,7 +44,14 @@ def _normalize_account(raw, idx):
     acc = {"name": name, "username": username, "password": password}
     for wf in walk_fields:
         if wf in raw and str(raw[wf]).strip() != "":
-            acc[wf] = raw[wf]
+            val = raw[wf]
+            # walk_step 容错：JSON 里写成字符串 "11000" 也能被 _resolve_target_step 识别
+            if wf == "walk_step":
+                try:
+                    val = int(val)
+                except (TypeError, ValueError):
+                    continue  # 非法整数则忽略，run_walk 会改用区间随机
+            acc[wf] = val
     return acc
 
 
