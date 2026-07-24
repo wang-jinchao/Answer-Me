@@ -1131,30 +1131,28 @@ def run_account(account, url, timeout: int = 30):
 
             # 每日一走：独立于 Web 答题体系，走微信小程序 liteapp openId 接口。
             # 执行顺序：① 先 run_walk 执行步数写入；② 再读 histscore 计算「每日运动+步数达标」得分汇总。
-            # 微信运动加密包（enc/iv/key）为运行时注入（环境变量 WALK_ENC/WALK_IV/WALK_KEY），
-            # 不写进静态 ACCOUNTS_JSON。仅当账号配置了 openid 才执行；否则标 skipped。
+            # 写入闸门 = usrreg 同 PHPSESSID 会话，不依赖 enc/iv/key / decrypt（维护态不阻断写入）。
+            # 仅当账号配置了 openid 才执行；否则标 skipped。
             walk_result = {}
             if account.get("openid"):
                 logger.info("账号 %s 配置了 openid，执行每日一走（先写步数，后读 histscore 汇分）",
                             account.get("name") or account.get("username"))
-                # 运行时加密包：优先环境变量，不存在则为 None -> run_walk 内部标 skipped
-                walk_enc = os.environ.get("WALK_ENC")
-                walk_iv = os.environ.get("WALK_IV")
-                walk_key = os.environ.get("WALK_KEY")
                 try:
-                    wk = run_walk(account, enc=walk_enc, iv=walk_iv, key=walk_key)
+                    wk = run_walk(account)
                 except Exception as e:
                     logger.exception("每日一走 run_walk 异常：%s", e)
                     wk = {"status": "failed", "reason": f"run_walk 异常：{e}"}
-                # ② 后读 histscore：计算今日「每日运动 + 步数达标」得分汇总（正常 +10）
-                try:
-                    wrows = _read_histscore_rows(page, url)
-                    wscore = _read_walk_score(wrows, today_mmdd)
-                    wk["motion_score"] = wscore.get("motion")
-                    wk["reach_score"] = wscore.get("reach")
-                    wk["today_walk_score"] = wscore.get("total")
-                except Exception as e:
-                    logger.warning("每日一走 读 histscore 得分汇总失败：%s", e)
+                # ② 后读 histscore 汇分：仅当本次确实写入成功（done）才读，避免 skipped/failed
+                #    仍渲染出「今日得分汇总 +X」造成误导（得分反映当天已有值，非本次写入产生）。
+                if wk.get("status") == "done":
+                    try:
+                        wrows = _read_histscore_rows(page, url)
+                        wscore = _read_walk_score(wrows, today_mmdd)
+                        wk["motion_score"] = wscore.get("motion")
+                        wk["reach_score"] = wscore.get("reach")
+                        wk["today_walk_score"] = wscore.get("total")
+                    except Exception as e:
+                        logger.warning("每日一走 读 histscore 得分汇总失败：%s", e)
                 walk_result = wk
             else:
                 walk_result = {

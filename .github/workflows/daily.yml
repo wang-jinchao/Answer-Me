@@ -31,9 +31,6 @@ jobs:
           NAME: ${{ secrets.NAME }}
           TARGET_URL: ${{ secrets.TARGET_URL }}
           HOMEPAGE_URL: ${{ secrets.HOMEPAGE_URL }}
-          WALK_ENC: ${{ secrets.WALK_ENC }}
-          WALK_IV: ${{ secrets.WALK_IV }}
-          WALK_KEY: ${{ secrets.WALK_KEY }}
         run: python src/main.py
 
       - name: Upload Report

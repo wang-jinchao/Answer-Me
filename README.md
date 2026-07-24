@@ -53,12 +53,12 @@ ACCOUNTS_JSON = [{
 }]
 ```
 - 每日一走走**微信小程序 liteapp 接口（openId 体系）**，与 Web 答题是两套体系。
-- **微信运动加密包（enc/iv/key）不放在 ACCOUNTS_JSON**——它是会话级动态数据，每次从微信小程序实时请求抓取，由**运行时环境变量 `WALK_ENC` / `WALK_IV` / `WALK_KEY`** 注入（Secret 或 workflow 环境变量）。写死在静态配置既无意义又很快失效。未注入时 `run_walk` 标 `skipped`（不写步数），不影响其他任务。
+- **写入闸门 = `usrreg` 建立的同一 PHPSESSID 会话**，不依赖 `decrypt`、不需要 `enc/iv/key`（decrypt 仅回读 30 天历史，站点维护中只阻断历史回读、不阻断写入）。因此无需在 Secret 里配置这三个值，CI 配好 `openid/unionid/walk_name` 即可自动写入。
 - **执行顺序**：先 `run_walk` 写步数 → 再读 histscore 取今日「每日运动 + 步数达标」求和（**正常 +10**），写入报告便于核对。
 - **步数规则**：每次运行**只上传当天这一条**记录（`timestamp` = 当天东八区 0 点秒级、`step` = 目标步数）；步数落在 **[10000, 12000] 随机**（配置 `walk_step` 在该区间内才生效，否则随机）；不在意后端对历史是合并还是覆盖，只要今天这条传上即可。
 - **不验证写入结果**：uploadstep 调用后即标记完成（不强制复核落库），符合"只同步、不校验"诉求。
 - **绑定校验只用 `walk_name`**：写前 `index.userName` 必须含 `walk_name` 才写，否则**立即中止、绝不误写**到错误账号（与账号显示名 `name` 无关）。
-- 静态 walk 字段（openid/unionid/walk_name/walk_step）只放 Secret，绝不写进仓库代码；动态 enc/iv/key 走独立 Secret。
+- 静态 walk 字段（openid/unionid/walk_name/walk_step）只放 Secret，绝不写进仓库代码。
 
 ## 2. 本地管理账号（推荐做法）
 

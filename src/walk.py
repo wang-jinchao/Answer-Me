@@ -6,17 +6,17 @@ upfitapp 每日一走 —— liteapp 步数写入（集成版，供 account_runn
 ============================================================
 ⚠️ 凭证安全（最高优先级，与答题任务同一规则）
 ------------------------------------------------------------
-1. 本模块不内置任何真实 <openId> / <unionid> / <enc> / <iv> / <key> / 姓名。
-2. 这些参数全部来自 ACCOUNTS_JSON（GitHub Secret，运行时注入），绝不落盘到仓库。
+1. 本模块不内置任何真实 <openId> / <unionid> / 姓名。
+2. openid/unionid 来自 ACCOUNTS_JSON（GitHub Secret，运行时注入），绝不落盘到仓库。
 3. 执行结束调用方应立即清除本次传入的临时值（Secret 本身不在仓库，安全）。
 
-机制说明（来自 upfit-daily-walk 技能实测）：
+机制说明（来自 upfit-daily-walk 技能实测，2026-07-24 修正）：
 - Web 端 RS 账号无法写入步数；步数落库走微信小程序 liteapp 接口（openId 体系）。
-- 四步必须共用同一 PHPSESSID（CookieJar 串联）：
-    usrreg → decrypt(解锁写入) → uploadstep(写今天) → index(复核)
-- 单独 uploadstep 会返回 result:true 但不落库（假成功）。
+- **写入闸门 = usrreg 建立的同一 PHPSESSID 会话**；usrreg→index(判绑定人)→uploadstep(写今天) 同 CookieJar 即落库。
+- 假成功（result:true 但不落库）的真正根因是 cookie 不共享 / 漏 usrreg，而非 decrypt 失败。
+- decrypt 仅用于回读 30 天历史；站点维护中只阻断历史回读、**不阻断写入**。本集成版只传今天一条，无需 decrypt，也不依赖 enc/iv/key。
 - openId 当前绑在谁，uploadstep 就写给谁；写前必校验 index.userName，非目标立即停，防误写。
-- 步数约束：每天只能 ≥ 当前服务端存储值（递增/相等），递减或暴涨被拒；只改今天最安全。
+- 步数约束：每天只能 ≥ 当前服务端存储值（递增/相等），递减或暴涨被拒；只传今天最安全。
 """
 
 import json
@@ -70,12 +70,6 @@ def _index(opener, openid, unionid):
     return _get_json(opener, f"{LITEAPP}/index?openId={openid}&unionid={unionid}&version={VERSION}")
 
 
-def _decrypt(opener, enc, iv, key):
-    url = (f"{LITEAPP}/decrypt?encryptedData={urllib.parse.quote(enc)}"
-           f"&iv={urllib.parse.quote(iv)}&sessionkey={urllib.parse.quote(key)}&version={VERSION}")
-    return _get_json(opener, url)
-
-
 def _uploadstep(opener, openid, step_info_list):
     si = urllib.parse.quote(json.dumps(step_info_list, separators=(",", ":")))
     url = f"{LITEAPP}/uploadstep?stepInfo={si}&openId={openid}&version={VERSION}"
@@ -99,12 +93,11 @@ def _resolve_target_step(walk_step):
     return random.randint(WALK_STEP_MIN, WALK_STEP_MAX)
 
 
-def run_walk(account: dict, enc: str = None, iv: str = None, key: str = None) -> dict:
+def run_walk(account: dict) -> dict:
     """为单个账号执行每日一走（仅当配置了 openid 时由调用方决定调用）。
 
-    参数 enc/iv/key 为微信运动加密包（encryptedData/iv/session_key），**会话级动态、每次都变**，
-    必须由运行时从微信小程序实时请求里抓取后注入（如环境变量 WALK_ENC/WALK_IV/WALK_KEY），
-    **不来自静态账号配置**——写死既无意义又很快失效。
+    写入闸门 = usrreg 建立的同一 PHPSESSID 会话；本集成版只传「今天一条」记录，
+    **不需要 decrypt、不依赖 enc/iv/key**（decrypt 仅回读 30 天历史，维护态不阻断写入）。
 
     返回结构化结果 dict：
         {status, bound_name, before_step, target_step, after_step, reason,
@@ -136,12 +129,6 @@ def run_walk(account: dict, enc: str = None, iv: str = None, key: str = None) ->
         "today_walk_score": None,
     }
 
-    if not (enc and iv and key):
-        result["status"] = "skipped"
-        result["reason"] = "缺少运行时 decrypt 凭证（enc/iv/key），无法解锁写入，跳过"
-        logger.warning("账号 %s 每日一走缺少运行时 decrypt 凭证，跳过", target_name or openid)
-        return result
-
     opener, _ = _build_opener()
 
     # ① usrreg 建立会话
@@ -169,16 +156,8 @@ def run_walk(account: dict, enc: str = None, iv: str = None, key: str = None) ->
         logger.warning("每日一走 绑定漂移：期望 %s 实际 %s，中止防误写", target_name, bound)
         return result
 
-    # ② decrypt 解锁写入（写门禁：跳过 decrypt 则 uploadstep 返回 true 但不落库，属假成功）
-    # 注意：此处仅用 decrypt 解锁写入权限，不再使用其返回的 30 天历史。
-    try:
-        dec = _decrypt(opener, enc, iv, key)
-    except Exception as e:
-        result["reason"] = f"decrypt 失败：{e}"
-        return result
-    if "_raw" in dec:
-        result["reason"] = f"decrypt 返回非 JSON（可能站点维护中）：{str(dec['_raw'])[:80]}"
-        return result
+    # 注意：本集成版不调用 decrypt。写入闸门是 usrreg 同 PHPSESSID 会话，
+    # decrypt 仅回读 30 天历史，维护态不阻断写入；只传今天一条无需历史。
 
     # 决定今日目标步数：优先用配置的 walk_step，但须落在 [WALK_STEP_MIN, WALK_STEP_MAX]；否则区间随机。
     # 用户要求：每天只执行一次、只同步当天、步数落在 [10000,12000] 随机。
