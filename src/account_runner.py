@@ -580,10 +580,42 @@ def _await_advance(page, pos_pre, timeout: int = 5000):
     return False
 
 
+def _total_questions(page):
+    """题目总数（Vue listArr.length）。取不到返回 0，调用方降级用 max_questions。"""
+    try:
+        return page.evaluate(
+            "() => { const b=document.querySelector('[id^=\"qa__box\"]');"
+            " if(b&&b.__vue__&&b.__vue__.$data&&Array.isArray(b.__vue__.$data.listArr))"
+            " return b.__vue__.$data.listArr.length; return 0; }"
+        ) or 0
+    except Exception:
+        return 0
+
+
+def _wait_resolve_correct(page, timeout: int = 6000):
+    """重试解析正确项，吃掉“题目数据尚未就绪”的竞态。
+
+    旧逻辑在循环开头直接 _resolve_correct_option，若此刻 posNum 已切到新题、
+    但 curTopic.right.uuid 尚未填充，会返回 None → 被误判为“题间过渡”直接跳下一题，
+    导致正在加载的题被静默跳过（偶发跳题根因之一）。这里先短重试再下结论。
+    """
+    deadline = time.time() + timeout / 1000.0
+    while time.time() < deadline:
+        c = _resolve_correct_option(page)
+        if c:
+            return c
+        if _quiz_is_analysis(page):
+            return None
+        time.sleep(0.3)
+    return None
+
+
 def _run_quiz(page, task_label, max_questions, homepage_url):
     details = {
         'status': 'skipped',
         'answered': 0,
+        'skipped': 0,
+        'expected': 0,
         'questions': [],
     }
 
@@ -610,38 +642,54 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
     _wait_quiz_ready(page, timeout=8000)
     time.sleep(0.5)
 
-    # 用 Vue posNum 判定题号前进（比 DOM 正则「第N题」更可靠，解析层/过渡页不抖）。
-    # 循环按「进入结算页」终止并给次数余量，避免固定 range 不足而少答（曾偶发吞题）。
-    for attempt in range(max_questions + 3):
+    # 读真实总题数（Vue listArr.length）作为闭环依据；取不到降级用 max_questions。
+    total = _total_questions(page) or max_questions
+    details['expected'] = total
+    safety = total + 5  # 硬上限，防异常时死循环
+
+    # 不再用固定 range：循环到「已答 + 已跳 == 预期」为止，确保每题都被尝试。
+    guard = 0
+    while (details['answered'] + details['skipped']) < total and guard < safety:
+        guard += 1
         summary = _capture_quiz_summary(page)
-        correct = _resolve_correct_option(page)
+        # 先短重试解析，吃掉“posNum 已变但 right.uuid 未填充”的竞态（偶发跳题根因）。
+        correct = _wait_resolve_correct(page, timeout=6000)
         question_record = {
             'question': summary.get('question'),
             'options': summary.get('options'),
             'selected_uuid': None,
             'correct_uuid': correct['uuid'] if correct else None,
         }
+
         if not correct:
-            # 已进入结算/解析页（选项为空、无正确项）：若已答过题则视为完成
-            if details['answered'] > 0 and _quiz_is_analysis(page):
-                logger.info('%s 进入结算/解析页，判定为完成（已答 %d 题）', task_label, details['answered'])
+            # 结算/解析页：视为完成（前提是已答过题）。
+            if _quiz_is_analysis(page):
+                if details['answered'] > 0:
+                    logger.info('%s 进入结算/解析页，判定为完成（已答 %d / 预期 %d）',
+                                task_label, details['answered'], total)
+                else:
+                    logger.warning('%s 进入结算页但一题未答，疑似提前结束', task_label)
                 details['status'] = 'done'
                 return details
-            # 可能停在“确定”后的答案解析过渡页，再尝试点“下一题/提交/完成”推进一次
-            if details['answered'] > 0:
+            # 非结算页却解析不到正确项：区分「题已加载但无法解析」与「题间过渡」。
+            cq = _current_question(page)
+            opts = (cq or {}).get('options') or []
+            if opts:
+                # 题已加载、有选项但正确项无法解析：明确记为“跳过”并打日志（绝不静默丢题）。
+                idx = details['answered'] + details['skipped'] + 1
+                logger.warning('%s 第 %d 题有选项但无法解析正确项，记为跳过: %s',
+                               task_label, idx,
+                               (summary.get('question') or '').strip().replace('\n', ' ')[:80])
+                details['skipped'] += 1
+                question_record['skipped'] = True
+                details['questions'].append(question_record)
                 _click_button_by_text(page, ['下一题', '提交', '完成'])
-                time.sleep(1.2)
-                if _resolve_correct_option(page):
-                    continue
-                if _quiz_is_analysis(page):
-                    details['status'] = 'done'
-                    return details
-            details['status'] = 'failed'
-            details['reason'] = 'Could not determine correct answer'
-            details['questions'].append(question_record)
-            _log_quiz_diag(page, task_label)
-            _dump_debug_html(page, task_label)
-            return details
+                time.sleep(1.0)
+                continue
+            # 仍在题间过渡：推进一次再试。
+            _click_button_by_text(page, ['下一题', '提交', '完成'])
+            time.sleep(1.0)
+            continue
 
         clicked = _click_option(page, correct)
         question_record['selected_uuid'] = correct['uuid']
@@ -660,8 +708,6 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
             return details
 
         # 锁答案并前进：先点“确定/确认”；若未前进（弹解析层），再点“下一题/提交/完成”。
-        # 用轮询等待真实前进（posNum 变化或进入结算），消除过渡页延迟导致读早误判，
-        # 避免因“误以为没前进”而多补点一次 → 跳题/吞题。
         pos_pre = _current_pos(page)
         _click_button_by_text(page, ['确定', '确认'])
         if not _await_advance(page, pos_pre, timeout=2500):
@@ -669,9 +715,13 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
             _await_advance(page, pos_pre, timeout=6000)
         time.sleep(0.4)
 
-    # 循环上限到达（极少见，未进入结算）：以实际已答题数为准，标记完成，避免少答漏判。
-    logger.info('%s 达到循环上限（已答 %d 题），按实际题数判定完成', task_label, details['answered'])
-    details['status'] = 'done'
+    # 闭环结束：未答满预期必打警告（含跳过数），不再静默显示“完成”。
+    if details['answered'] < total:
+        logger.warning('%s 未答满预期题数（已答 %d / 预期 %d，跳过 %d），可能仍有跳题',
+                       task_label, details['answered'], total, details['skipped'])
+        details['status'] = 'done_with_skips' if details['answered'] > 0 else 'failed'
+    else:
+        details['status'] = 'done'
     return details
 
 

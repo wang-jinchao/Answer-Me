@@ -32,10 +32,13 @@ def _task_line(task_result):
     if not isinstance(task_result, dict):
         return "- 状态：未知"
     status = task_result.get("status")
-    if status == "done":
+    if status in ("done", "done_with_skips"):
         extra = ""
         if "answered" in task_result:
-            extra = f"（答对记录 {task_result['answered']} 题）"
+            extra = f"（答对记录 {task_result['answered']} 题"
+            if task_result.get("skipped"):
+                extra += f"，跳过 {task_result['skipped']} 题"
+            extra += "）"
         if "before_step" in task_result or "today_walk_score" in task_result:
             b, a = task_result.get("before_step"), task_result.get("after_step")
             if b is not None or a is not None:
@@ -43,6 +46,8 @@ def _task_line(task_result):
             ws = task_result.get("today_walk_score")
             if ws is not None:
                 extra += f"，今日得分 +{ws}（每日运动+步数达标）"
+        if status == "done_with_skips":
+            return f"- 状态：**完成（有跳过）** ⚠️ {extra}"
         return f"- 状态：**完成** ✅ {extra}"
     if status == "skipped":
         return "- 状态：跳过 ⚪"
@@ -68,8 +73,10 @@ def _account_verdict(tasks):
             failed_items.append((label, "未执行（结果缺失）"))
             continue
         st = t.get("status")
-        if st == "done":
+        if st in ("done", "done_with_skips"):
             done += 1
+            if st == "done_with_skips" and t.get("skipped"):
+                failed_items.append((label, f"有 {t['skipped']} 题解析失败被跳过"))
         elif st in ("skipped", "no_attempts"):
             skip += 1
         else:
