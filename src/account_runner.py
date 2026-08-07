@@ -257,8 +257,36 @@ def _enter_quiz(page):
     return False
 
 
+def _try_click_node(node):
+    """对一个已定位的 DOM 节点（ElementHandle）尝试点击，按 普通 -> force -> JS 三级兜底，
+    绕过被遮罩/未稳定导致的 Playwright actionability 失败（如题间过渡遮罩层拦截点击）。"""
+    try:
+        node.scroll_into_view_if_needed(timeout=1500)
+    except Exception:
+        pass
+    # 1) 普通点击（含 actionability 检查，失败多为被遮挡/未稳定）
+    try:
+        node.click(timeout=2000)
+        return True
+    except Exception:
+        pass
+    # 2) 强制点击（忽略遮挡与稳定检查）
+    try:
+        node.click(timeout=1500, force=True)
+        return True
+    except Exception:
+        pass
+    # 3) JS 直接触发点击（绕过一切 Playwright 拦截，兜底）
+    try:
+        node.evaluate("el => el.click()")
+        return True
+    except Exception:
+        pass
+    return False
+
+
 def _click_option(page, correct):
-    """按 属性 -> 索引(.answer .item) -> 文本 三级兜底点击正确选项。"""
+    """按 属性 -> 索引(.answer .item) -> 文本 三级兜底点击正确选项；每级内部再做 普通/force/JS 三级点击兜底。"""
     uuid = correct.get("uuid")
     index = correct.get("index")
     text = (correct.get("text") or "").strip()
@@ -267,8 +295,7 @@ def _click_option(page, correct):
         for sel in [f'[data-uuid="{uuid}"]', f'[uuid="{uuid}"]', f'[data-id="{uuid}"]', f'input[value="{uuid}"]']:
             try:
                 node = page.query_selector(sel)
-                if node:
-                    node.click()
+                if node and _try_click_node(node):
                     return True
             except Exception:
                 pass
@@ -277,8 +304,9 @@ def _click_option(page, correct):
         try:
             loc = page.locator('[id^="qa__box"] .answer .item')
             if loc.count() > index:
-                loc.nth(index).click()
-                return True
+                node = loc.nth(index).element_handle()
+                if node and _try_click_node(node):
+                    return True
         except Exception:
             pass
     # 3) 按文本兜底（去掉开头的 ①②③ / A.B. 等前缀后做子串匹配）
@@ -288,8 +316,9 @@ def _click_option(page, correct):
             try:
                 loc = page.locator('[id^="qa__box"] .answer .item').filter(has_text=search).first
                 if loc.count():
-                    loc.click()
-                    return True
+                    node = loc.first.element_handle()
+                    if node and _try_click_node(node):
+                        return True
             except Exception:
                 pass
     return False
@@ -691,21 +720,36 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
             time.sleep(1.0)
             continue
 
-        clicked = _click_option(page, correct)
-        question_record['selected_uuid'] = correct['uuid']
-        details['questions'].append(question_record)
-        details['answered'] += 1
-        logger.info('%s 作答: %s | 正确uuid=%s 点击=%s',
-                    task_label,
-                    (summary.get('question') or '').strip().replace('\n', ' ')[:80],
-                    correct['uuid'], clicked)
-
+        # 点击正确选项：先重试几次（题间遮罩/未稳定可能导致偶发点击失败，重试即可恢复）。
+        clicked = False
+        qidx = details['answered'] + details['skipped'] + 1
+        for _att in range(3):
+            if _click_option(page, correct):
+                clicked = True
+                break
+            logger.warning('%s 第 %d 题点击正确选项失败，重试(%d/3) uuid=%s',
+                           task_label, qidx, _att + 1, correct['uuid'])
+            time.sleep(0.5)
         if not clicked:
+            # 点击失败：如实记录（selected_uuid=None），不得虚增已答数，避免“假满分”误导。
+            logger.warning('%s 第 %d 题无法点击正确选项 uuid=%s，判定失败',
+                           task_label, qidx, correct['uuid'])
+            question_record['selected_uuid'] = None
+            details['questions'].append(question_record)
             details['status'] = 'failed'
             details['reason'] = f'Could not click option {correct["uuid"]}'
             _log_quiz_diag(page, task_label)
             _dump_debug_html(page, task_label)
             return details
+
+        # 点击成功才计入已答并落记录（修复：原先在 click 校验前就 +1，导致点击失败时虚增已答）。
+        question_record['selected_uuid'] = correct['uuid']
+        details['questions'].append(question_record)
+        details['answered'] += 1
+        logger.info('%s 作答: %s | 正确uuid=%s',
+                    task_label,
+                    (summary.get('question') or '').strip().replace('\n', ' ')[:80],
+                    correct['uuid'])
 
         # 锁答案并前进：先点“确定/确认”；若未前进（弹解析层），再点“下一题/提交/完成”。
         pos_pre = _current_pos(page)
