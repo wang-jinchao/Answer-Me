@@ -13,3 +13,5 @@ accounts.json
 
 # Run artifacts (generated reports, not source)
 reports/
+# Debug HTML dumps (may contain logged-in page content; never commit)
+debug/

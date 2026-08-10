@@ -208,12 +208,18 @@ def _resolve_correct_option(page):
 
 
 def _quiz_entered(page):
-    """是否已真正进入答题（Vue 组件已挂载）。"""
+    """是否已真正进入答题（Vue 组件已挂载，或已出现选项/题干）。"""
     try:
         return page.evaluate("""() => {
             const b = document.querySelector('[id^="qa__box"]');
             if (b && b.__vue__) return true;
-            return !!(window.rightList && window.rightList.length);
+            if (window.rightList && window.rightList.length) return true;
+            // 兜底：出现选项容器或“第N题”题干即视为已进入（应对 Vue 挂载慢/结构微调）
+            if (document.querySelector('[id^="qa__box"] .answer .item')) return true;
+            if (document.querySelector('.answer .item')) return true;
+            const t = (document.body && document.body.innerText) || '';
+            if (/第\\s*\\d+\\s*题/.test(t)) return true;
+            return false;
         }""")
     except Exception:
         return False
@@ -236,25 +242,59 @@ def _quiz_is_analysis(page):
 
 
 def _enter_quiz(page):
-    """点击“开始答题”进入答题；每点一个候选都验证是否真的进入，进入才返回 True。"""
+    """点击“开始答题”进入答题；每点一个候选都验证是否真的进入，进入才返回 True。
+    点击后轮询等待（最多 ~10s）再判进入，避开“Vue 挂载慢于 1.5s”的误判；
+    全部候选失败则打印页面真实入口文案，便于定位站点改版。"""
     candidates = [
         "开始答题", "立即答题", "开始作答", "开始练习", "开始学习",
-        "去答题", "进入答题", "去做题", "做任务", "开始", "答题", "练习", "作答",
+        "去答题", "进入答题", "去做题", "做任务", "开始挑战", "开始", "答题", "练习", "作答",
     ]
+    tried = []
     for txt in candidates:
         try:
             loc = page.get_by_text(txt, exact=False)
             if not loc.first.count():
                 continue
             loc.first.click(timeout=8000)
-        except Exception:
+            tried.append(txt)
+        except Exception as e:
+            logger.debug("[quiz] 点击候选 '%s' 异常: %s", txt, e)
             continue
-        page.wait_for_timeout(1500)
-        if _quiz_entered(page):
+        # 轮询等待真正进入（Vue 挂载可能慢），最多 ~10s
+        entered = False
+        for _ in range(20):
+            page.wait_for_timeout(500)
+            if _quiz_entered(page):
+                entered = True
+                break
+        if entered:
             logger.info("[quiz] 已进入答题（点击文案='%s'）", txt)
             return True
         logger.debug("[quiz] 点击 '%s' 后未进入答题，尝试下一个候选", txt)
+    logger.warning("[quiz] 所有候选入口均未能进入答题，已尝试: %s", tried)
+    _log_entry_candidates(page)
     return False
+
+
+def _log_entry_candidates(page):
+    """进入答题失败时，抓取页面上所有疑似入口按钮/含关键词的文本，便于定位站点改版。"""
+    try:
+        data = page.evaluate("""() => {
+            const buttons = [];
+            const sel = 'button, a, [role="button"], .btn, [class*="start"], [class*="begin"], [class*="entry"]';
+            document.querySelectorAll(sel).forEach(el => {
+                const t = (el.innerText || el.getAttribute('title') || el.getAttribute('alt') || '').trim();
+                if (t && t.length <= 20) buttons.push(t);
+            });
+            const body = document.body ? document.body.innerText : '';
+            const hits = (body.match(/[^\\n]{0,15}(开始|答题|练习|作答|挑战|进入|去)[^\\n]{0,15}/g) || []).slice(0, 25);
+            return {buttons: [...new Set(buttons)].slice(0, 30), textHits: hits};
+        }""")
+        logger.warning("[quiz-entry-fail] 页面按钮文案: %s | 含关键词文本: %s",
+                       json.dumps(data.get("buttons", []), ensure_ascii=False),
+                       json.dumps(data.get("textHits", []), ensure_ascii=False))
+    except Exception as e:
+        logger.warning("[quiz-entry-fail] 提取入口文案失败: %s", e)
 
 
 def _try_click_node(node):
@@ -353,15 +393,25 @@ def _log_quiz_diag(page, task_label):
 
 
 def _dump_debug_html(page, task_label):
-    """答题异常时把页面 HTML 落盘，便于复现并定位 DOM 结构。"""
+    """答题异常时把页面调试片段落盘，便于复现并定位 DOM 结构。
+    只落『答题框子树』或『正文纯文本快照』，绝不写整页 page.content()，
+    避免把登录态页里的昵称 / 嵌入会话令牌等一并落盘造成泄露。"""
     try:
         import os
         os.makedirs("debug", exist_ok=True)
         safe = re.sub(r'[^\w]', '_', str(task_label))
         path = f"debug/quiz_debug_{safe}.html"
+        # 优先只取答题框子树（不含 header/nav/脚本里的会话信息）
+        snippet = page.evaluate("""() => {
+            const box = document.querySelector('[id^="qa__box"]');
+            if (box) return box.outerHTML;
+            // 进入失败等无答题框场景：只取正文纯文本，避免整页脚本/令牌外泄
+            const body = document.body ? document.body.innerText : '';
+            return '<pre>' + (body || '').replace(/</g, '&lt;') + '</pre>';
+        }""")
         with open(path, "w", encoding="utf-8") as f:
-            f.write(page.content())
-        logger.warning("[debug] 已保存答题页 HTML -> %s", path)
+            f.write(snippet)
+        logger.warning("[debug] 已保存答题页调试片段 -> %s", path)
     except Exception as e:
         logger.warning("[debug] 保存调试 HTML 失败: %s", e)
 
