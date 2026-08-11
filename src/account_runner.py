@@ -226,9 +226,23 @@ def _quiz_entered(page):
 
 
 def _quiz_is_analysis(page):
-    """是否已进入结算/解析页（无题目可答）。分析页 URL 含 /analysis，或页面出现完成类文案。"""
+    """是否已进入结算/解析页（无题目可答）。
+
+    关键护栏：只要页面上仍出现可答选项（.answer .item 或 curTopic.answer 非空）
+    就一律判为“非结算页”。这样“有题目但被完成类关键词误判”的跳题场景被从根上消除
+    （之前正是第 N 题界面残留“成绩/本次答对”等文案时，被误判为结算页 → 提前 done → 漏答）。
+    """
     try:
         return page.evaluate("""() => {
+            // 1) 页面上仍有可答选项 → 绝不可能是结算页
+            if (document.querySelector('[id^="qa__box"] .answer .item')) return false;
+            const b = document.querySelector('[id^="qa__box"]');
+            if (b && b.__vue__ && b.__vue__.$data) {
+                const d = b.__vue__.$data;
+                const cur = d.curTopic || (d.listArr && d.listArr[d.posNum]) || null;
+                if (cur && Array.isArray(cur.answer) && cur.answer.length) return false;
+            }
+            // 2) 真正无题目时，再按 URL / 完成类文案判定
             const url = location.href || '';
             if (/\\/(analysis|answeranalysis)/i.test(url)) return true;
             const body = document.body;
