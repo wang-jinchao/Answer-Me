@@ -815,12 +815,16 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
                     (summary.get('question') or '').strip().replace('\n', ' ')[:80],
                     correct['uuid'])
 
-        # 锁答案并前进：先点“确定/确认”；若未前进（弹解析层），再点“下一题/提交/完成”。
+        # 锁答案并前进：点“确定/确认”后即应切到下一题（posNum 变化）。
+        # 去掉原 fallback 无条件再点“下一题/提交/完成”：慢过渡时 _await_advance 误判未前进，
+        # 会再点“下一题”造成双击跳题（漏答中间某题，如 08-18 王晋超账号缺失第2题）。
+        # 现仅在“确定/确认”未命中（页面无该按钮）时才补点“下一题/提交/完成”兜底，
+        # 从根本上消除双击竞态；等待统一为 3000ms。
         pos_pre = _current_pos(page)
-        _click_button_by_text(page, ['确定', '确认'])
-        if not _await_advance(page, pos_pre, timeout=2500):
+        confirmed = _click_button_by_text(page, ['确定', '确认'])
+        if not _await_advance(page, pos_pre, timeout=3000) and not confirmed:
             _click_button_by_text(page, ['下一题', '提交', '完成'])
-            _await_advance(page, pos_pre, timeout=6000)
+            _await_advance(page, pos_pre, timeout=3000)
         time.sleep(0.4)
 
     # 闭环结束：未答满预期必打警告（含跳过数），不再静默显示“完成”。
