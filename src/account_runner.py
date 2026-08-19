@@ -685,7 +685,7 @@ def _total_questions(page):
         return 0
 
 
-def _wait_resolve_correct(page, timeout: int = 6000):
+def _wait_resolve_correct(page, timeout: int = 8000):
     """重试解析正确项，吃掉“题目数据尚未就绪”的竞态。
 
     旧逻辑在循环开头直接 _resolve_correct_option，若此刻 posNum 已切到新题、
@@ -746,7 +746,7 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
         guard += 1
         summary = _capture_quiz_summary(page)
         # 先短重试解析，吃掉“posNum 已变但 right.uuid 未填充”的竞态（偶发跳题根因）。
-        correct = _wait_resolve_correct(page, timeout=6000)
+        correct = _wait_resolve_correct(page, timeout=8000)
         question_record = {
             'question': summary.get('question'),
             'options': summary.get('options'),
@@ -776,12 +776,23 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
                 details['skipped'] += 1
                 question_record['skipped'] = True
                 details['questions'].append(question_record)
+                pos_pre = _current_pos(page)
                 _click_button_by_text(page, ['下一题', '提交', '完成'])
-                time.sleep(1.0)
+                _await_advance(page, pos_pre, timeout=3000)
                 continue
-            # 仍在题间过渡：推进一次再试。
+            # 区分「活题已挂载但数据未填充」与「真·题间过渡」。
+            if cq is not None:
+                # 活题已挂载（curTopic 存在）但 right.uuid / answer 尚未填充：
+                # 这是数据未就绪的竞态，绝不盲目前进，回到循环顶重试解析。
+                logger.warning('%s 第 %d 题：活题已挂载但正确项未就绪，重试等待（不前进、不跳过）',
+                               task_label, details['answered'] + details['skipped'] + 1)
+                time.sleep(0.8)
+                continue
+            # 真·题间过渡（无任何题目数据）：推进一次再试。
+            pos_pre = _current_pos(page)
             _click_button_by_text(page, ['下一题', '提交', '完成'])
-            time.sleep(1.0)
+            _await_advance(page, pos_pre, timeout=3000)
+            time.sleep(0.5)
             continue
 
         # 点击正确选项：先重试几次（题间遮罩/未稳定可能导致偶发点击失败，重试即可恢复）。
