@@ -795,6 +795,14 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
             time.sleep(0.5)
             continue
 
+        # 解析到正确项 ≠ 页面此刻仍在答题页：站点有 150s 总计时，解析与点击之间
+        # 页面可能已被站点切到结算页（尤其末题）。点击前再确认一次，避免对着结算页
+        # 点不存在的选项（这正是末题 selected_uuid:null、reason=Could not click 的根因）。
+        if _quiz_is_analysis(page):
+            logger.info('%s 解析到正确项后页面已结算，收尾（已答 %d / 预期 %d）',
+                        task_label, details['answered'], total)
+            break
+
         # 点击正确选项：先重试几次（题间遮罩/未稳定可能导致偶发点击失败，重试即可恢复）。
         clicked = False
         qidx = details['answered'] + details['skipped'] + 1
@@ -806,7 +814,14 @@ def _run_quiz(page, task_label, max_questions, homepage_url):
                            task_label, qidx, _att + 1, correct['uuid'])
             time.sleep(0.5)
         if not clicked:
-            # 点击失败：如实记录（selected_uuid=None），不得虚增已答数，避免“假满分”误导。
+            # 点击失败先复检：站点总计时 / 末题偶发在 3 次重试期间把页面切到结算页，
+            # 此刻“点不中”是页面已前进的假象，并非脚本真漏答。若已结算则按 quiz 结束收尾，
+            # 不再伪装成“Could not click option”的失败（避免上报层误判与掩盖）。
+            if _quiz_is_analysis(page):
+                logger.warning('%s 第 %d 题点击未命中但页面已到结算页，按 quiz 已结束收尾（已答 %d / 预期 %d）',
+                               task_label, qidx, details['answered'], total)
+                break
+            # 仍在答题页却点不中：如实记录（selected_uuid=None），不虚增已答，避免“假满分”。
             logger.warning('%s 第 %d 题无法点击正确选项 uuid=%s，判定失败',
                            task_label, qidx, correct['uuid'])
             question_record['selected_uuid'] = None
