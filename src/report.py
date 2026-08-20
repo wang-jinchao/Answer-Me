@@ -73,10 +73,20 @@ def _account_verdict(tasks):
             failed_items.append((label, "未执行（结果缺失）"))
             continue
         st = t.get("status")
-        if st in ("done", "done_with_skips"):
+        if st == "done":
             done += 1
-            if st == "done_with_skips" and t.get("skipped"):
-                failed_items.append((label, f"有 {t['skipped']} 题解析失败被跳过"))
+        elif st == "done_with_skips":
+            answered = t.get("answered")
+            expected = t.get("expected")
+            if answered is not None and expected is not None and answered < expected:
+                # ★ 关键修正：P1 产生的少答是 skipped=0、answered<expected（末题点不中），
+                # 头条必须如实计为未完成，否则仍会显示“完成 X/4”掩盖真实少答。
+                fail += 1
+                failed_items.append((label, f"实际答对 {answered}/{expected} 题（少 {expected - answered} 题）"))
+            else:
+                done += 1
+                if t.get("skipped"):
+                    failed_items.append((label, f"有 {t['skipped']} 题解析失败被跳过"))
         elif st in ("skipped", "no_attempts"):
             skip += 1
         else:

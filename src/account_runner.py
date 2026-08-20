@@ -1143,7 +1143,25 @@ def _verify_all_tasks(page, result, homepage_url=None):
             if verdict and verdict.get('done'):
                 prev['histscore_score'] = verdict.get('score')
                 prev['histscore_time'] = verdict.get('time')
-                if prev.get('status') != 'done':
+                inpage = prev.get('status')
+                expected = prev.get('expected') or 0
+                answered = prev.get('answered') if 'answered' in prev else None
+                counted = bool(expected) and answered is not None
+                if inpage == 'done':
+                    # 页面已报完成，histscore 仅交叉确认
+                    prev['verified_by'] = 'histscore'
+                elif counted and answered < expected:
+                    # ★ 关键修正：页面真实计过数且答不满（done_with_skips/failed）。
+                    # histscore 有积分 ≠ 全部答完（部分作答也得分），绝不升级为 done。
+                    prev['verified_by'] = 'histscore_points_only'
+                    prev['reason'] = ('histscore shows %s points @ %s, but in-page answered %s/%s '
+                                      '(status=%s); NOT upgraded. orig: %s') % (
+                        verdict.get('score'), verdict.get('time'),
+                        answered, expected, inpage, prev.get('reason'))
+                    logger.warning('Task %s kept as %s: in-page %s/%s, histscore only proves points',
+                                   key, inpage, answered, expected)
+                else:
+                    # 页面状态不可信（如 daily_learn 选择器漏判，无 expected）→ histscore 为权威，升级 done
                     orig = prev.get('reason')
                     prev['status'] = 'done'
                     prev['verified_by'] = 'histscore'
@@ -1151,8 +1169,6 @@ def _verify_all_tasks(page, result, homepage_url=None):
                         verdict.get('score'), verdict.get('time'), orig)
                     logger.info('Task %s upgraded to done via histscore (%s @ %s)',
                                 key, verdict.get('score'), verdict.get('time'))
-                else:
-                    prev['verified_by'] = 'histscore'
             else:
                 if prev.get('status') == 'done':
                     prev['status'] = 'failed'
