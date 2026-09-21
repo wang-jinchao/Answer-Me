@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-20",
+  "sig": {
+    "links": [
+      {
+        "t": "每日一学",
+        "h": "/aero/detnews?uuid=2423417242993320009"
+      },
+      {
+        "t": "每日一看",
+        "h": "/aero/detnews?uuid=2425017257183290001"
+      },
+      {
+        "t": "每日一答",
+        "h": "/aero/detnews?uuid=2423417242993830002"
+      },
+      {
+        "t": "每日一练",
+        "h": "/aero/detnews?uuid=2423417242993720001"
+      },
+      {
+        "t": "每日一走",
+        "h": "/aero/detnews?uuid=2423417242993940045"
+      }
+    ],
+    "banners": [
+      "https://data.upfitapp.com/data/2026/09/14/2625617893491330002.",
+      "https://data.upfitapp.com/data/2026/09/14/2625617893491600001.",
+      "https://data.upfitapp.com/data/2026/09/14/2625617893492170001.",
+      "https://data.upfitapp.com/data/2026/09/14/2625617893492410001."
+    ],
+    "main_hash": "cec2f5c28eebc2c94e7b79700b78cd8aefc06dff32f94cee49fb455874f77ddf"
+  }
+}

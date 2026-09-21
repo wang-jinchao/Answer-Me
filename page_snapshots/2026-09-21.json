@@ -1,0 +1,125 @@
+{
+  "date": "2026-09-21",
+  "sig": {
+    "containers": {
+      ".humanSociety-link": {
+        "found": true,
+        "count": 15,
+        "items": [
+          {
+            "tag": "a",
+            "cls": "humanSociety-linkAct",
+            "text": "每日一学",
+            "href": "/aero/detnews?uuid=2423417242993320009",
+            "src": ""
+          },
+          {
+            "tag": "img",
+            "cls": "",
+            "text": "",
+            "href": "",
+            "src": "https://data.upfitapp.com/materials/2024/08/23/2423517243955494799.png"
+          },
+          {
+            "tag": "div",
+            "cls": "linkAct-title",
+            "text": "每日一学",
+            "href": "",
+            "src": ""
+          },
+          {
+            "tag": "a",
+            "cls": "humanSociety-linkAct",
+            "text": "每日一看",
+            "href": "/aero/detnews?uuid=2425017257187540002",
+            "src": ""
+          },
+          {
+            "tag": "img",
+            "cls": "",
+            "text": "",
+            "href": "",
+            "src": "https://data.upfitapp.com/materials/2024/08/23/2423517243955523112.png"
+          },
+          {
+            "tag": "div",
+            "cls": "linkAct-title",
+            "text": "每日一看",
+            "href": "",
+            "src": ""
+          },
+          {
+            "tag": "a",
+            "cls": "humanSociety-linkAct",
+            "text": "每日一练",
+            "href": "/aero/detnews?uuid=2423417242993720001",
+            "src": ""
+          },
+          {
+            "tag": "img",
+            "cls": "",
+            "text": "",
+            "href": "",
+            "src": "https://data.upfitapp.com/materials/2024/08/23/2423517243955580167.png"
+          },
+          {
+            "tag": "div",
+            "cls": "linkAct-title",
+            "text": "每日一练",
+            "href": "",
+            "src": ""
+          },
+          {
+            "tag": "a",
+            "cls": "humanSociety-linkAct",
+            "text": "每日一答",
+            "href": "/aero/detnews?uuid=2423417242993830002",
+            "src": ""
+          },
+          {
+            "tag": "img",
+            "cls": "",
+            "text": "",
+            "href": "",
+            "src": "https://data.upfitapp.com/materials/2024/08/23/2423517243955608819.png"
+          },
+          {
+            "tag": "div",
+            "cls": "linkAct-title",
+            "text": "每日一答",
+            "href": "",
+            "src": ""
+          },
+          {
+            "tag": "a",
+            "cls": "humanSociety-linkAct",
+            "text": "每日一走",
+            "href": "/aero/detnews?uuid=2423417242993940045",
+            "src": ""
+          },
+          {
+            "tag": "img",
+            "cls": "",
+            "text": "",
+            "href": "",
+            "src": "https://data.upfitapp.com/materials/2024/08/23/2423517243955672010.png"
+          },
+          {
+            "tag": "div",
+            "cls": "linkAct-title",
+            "text": "每日一走",
+            "href": "",
+            "src": ""
+          }
+        ],
+        "hash": "541cf7d00b0285fabb2a88dadd7e51006ba4c9e59a27c6d52756bca374a4495c"
+      },
+      ".dailyActivityWarp": {
+        "found": false,
+        "count": 0,
+        "items": [],
+        "hash": null
+      }
+    }
+  }
+}

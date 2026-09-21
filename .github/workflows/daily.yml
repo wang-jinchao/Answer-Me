@@ -1,0 +1,108 @@
+name: Daily Automation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  automation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browser
+        run: playwright install chromium
+
+      # 静态门禁：跑任务前先拦截「Python 语法 / 内嵌 JS 语法 / 单元用例」三类错误。
+      # 背景：src/account_runner.py 里大量逻辑是内嵌在 Python 字符串里的 JavaScript，
+      # Python 的编译期检查对它们完全无效，只能等到真跑一遍才暴露
+      # （2026-09-20 每日一炼 0 分事故：内嵌 JS 写成自执行 IIFE，Playwright 不传参）。
+      # 这几项都在本地秒级完成且零网络依赖，先跑通再开浏览器，避免白烧一次运行。
+      - name: Static checks
+        run: |
+          python -m compileall -q src || exit 1
+          python tests/check_embedded_js.py || exit 1
+          # --selftest 先证明规则本身没失效，再拿它扫全项目（防「规则写了但形同虚设」）
+          python tests/check_playwright_api.py --selftest || exit 1
+          python tests/check_playwright_api.py || exit 1
+          # 通用版：把 src/ 下**全部** Playwright 调用的关键字参数，与已安装 playwright
+          # 的真实签名逐一比对（不只认得上面 4 个 requests 写法），并校验 wait_until/state
+          # 枚举取值。起因：曾只查「参数名在不在签名里」就下结论，没读注解和文档，
+          # 把 data= 说成只能传 str/bytes（实际 Any|bytes|str|None，dict 会自动序列化）。
+          python tests/check_playwright_kwargs.py --selftest || exit 1
+          python tests/check_playwright_kwargs.py || exit 1
+          python tests/check_page_alert.py || exit 1
+          python tests/local_verify.py || exit 1
+          # local_verify 会写出样例报告，清掉，避免真实 Run 失败时被误当成本次结果上传
+          rm -rf reports debug || true
+
+      - name: Run
+        env:
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          NAME: ${{ secrets.NAME }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+          TARGET_URL_2: ${{ secrets.TARGET_URL_2 }}
+          HOMEPAGE_URL: ${{ secrets.HOMEPAGE_URL }}
+          WALK_BASE_URL: ${{ secrets.WALK_BASE_URL }}
+        run: python src/main.py
+
+      - name: Commit page snapshots
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f page_snapshots/ || true
+          if git diff --cached --quiet; then echo "no snapshot changes"; else git commit -m "chore: update page snapshot $(date +%F)" && git push || echo "push failed"; fi
+
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: reports/
+
+      - name: Notify iPhone (Bark) & WeChat (Server 酱)
+        if: always()
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          REP=$(ls -t reports/*.md 2>/dev/null | head -1 || true)
+          if [ -z "$REP" ]; then
+            SUMMARY_MD="未生成报告（任务可能未成功运行）"
+            SUMMARY_TXT="$SUMMARY_MD"
+          else
+            SUMMARY_MD=$(python3 -c "
+          import re
+          txt=open('$REP', encoding='utf-8').read()
+          m=re.search(r'## 总览(.*?)\n---', txt, re.S)
+          body=m.group(1).strip() if m else txt[:500]
+          print(body)
+          " || echo "报告解析失败")
+            SUMMARY_TXT=$(printf '%s' "$SUMMARY_MD" | sed -e 's/\*\*//g' -e 's/^#\+ *//')
+          fi
+          TITLE="每日任务自动化"
+          if [ -n "$BARK_URL" ]; then
+            curl -s -X POST "$BARK_URL" \
+              --data-urlencode "title=$TITLE" \
+              --data-urlencode "body=$SUMMARY_TXT" || true
+          fi
+          if [ -n "$SERVERCHAN_KEY" ]; then
+            curl -s -G "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+              --data-urlencode "title=$TITLE" \
+              --data-urlencode "desp=$SUMMARY_MD" || true
+          fi
