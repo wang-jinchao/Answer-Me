@@ -4,6 +4,7 @@ import logging
 import os
 import html
 import re
+import random
 import time
 import traceback
 from datetime import datetime, timezone, timedelta
@@ -1965,6 +1966,13 @@ def _preflight_skip_plan(page, today_mmdd, homepage_url=None):
         return {}
 
 
+def _random_sleep(lo: int, hi: int, label: str) -> None:
+    """随机等待 lo~hi 秒（含端点），用于错峰、把对 upfitapp 的请求打散。每次独立随机。"""
+    secs = random.randint(lo, hi)
+    logger.info("随机等待 %ds：%s", secs, label)
+    time.sleep(secs)
+
+
 def run_account(account, url, timeout: int = 30, walk_once: bool = True, reuse_page=None,
                 compare_snapshot: bool = True, preflight: bool = True, is_last_url: bool = False):
     result = {
@@ -2202,12 +2210,14 @@ def run_account(account, url, timeout: int = 30, walk_once: bool = True, reuse_p
                 _mark_skipped('daily_learn', skip_plan['daily_learn'])
             else:
                 _daily_learn(page, result['tasks'], url)
+            _random_sleep(60, 180, "积分任务间随机等待（每日一学后）")
 
             # 每日一看（文章阅读）：入口可能已下线，找不到则跳过（skip），不阻断其余任务。
             if 'daily_view' in skip_plan:
                 _mark_skipped('daily_view', skip_plan['daily_view'])
             else:
                 _daily_view(page, result['tasks'], url)
+            _random_sleep(60, 180, "积分任务间随机等待（每日一看后）")
 
             # 每日一炼（工间微运动 AI 体育）—— 2026-09 新增；伪造计数拿满 10 分上限。
             # 积分明细类别为「AI运动会」(+2/活动, 5 活动=10)，已纳入 histscore 反查/预检跳过。
@@ -2215,18 +2225,21 @@ def run_account(account, url, timeout: int = 30, walk_once: bool = True, reuse_p
                 _mark_skipped('daily_refine', skip_plan['daily_refine'])
             else:
                 result['tasks']['daily_refine'] = _daily_refine(page, url)
+            _random_sleep(60, 180, "积分任务间随机等待（每日一炼后）")
 
             # 每日一练（练兵比武）：入口可能已下线，找不到则跳过（skip_if_missing），不阻断其余任务。
             if 'daily_practice' in skip_plan:
                 _mark_skipped('daily_practice', skip_plan['daily_practice'])
             else:
                 result['tasks']['daily_practice'] = _run_quiz(page, '每日一练', 5, url, skip_if_missing=True)
+            _random_sleep(60, 180, "积分任务间随机等待（每日一练后）")
 
             # 每日一答（限时活动I）
             if 'daily_answer' in skip_plan:
                 _mark_skipped('daily_answer', skip_plan['daily_answer'])
             else:
                 result['tasks']['daily_answer'] = _run_quiz(page, '每日一答', 5, url, skip_if_missing=True)
+            _random_sleep(60, 180, "积分任务间随机等待（每日一答后）")
 
             # 用积分明细页交叉校验当前活跃任务今日是否完成（权威信号：修复每日一学假阴性/假阳性）
             # allow_upgrade=preflight：只有首个 URL（preflight 开启）才允许用积分明细
@@ -2270,6 +2283,7 @@ def run_account(account, url, timeout: int = 30, walk_once: bool = True, reuse_p
                     "reason": "账号未配置 openid，跳过每日一走",
                 }
             result["tasks"]["daily_walk"] = walk_result
+            _random_sleep(60, 180, "积分任务间随机等待（每日一走后）")
 
             _goto(page, url, timeout=timeout * 1000)
             _wait_for_reload(page, timeout=10000)

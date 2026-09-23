@@ -4,7 +4,7 @@ import time
 
 from browser import Browser
 from config import load_accounts, get_urls
-from account_runner import run_account
+from account_runner import run_account, _random_sleep
 from report import save
 
 
@@ -31,6 +31,8 @@ def _is_transient_network_error(res):
 
 
 def main():
+    # 启动前随机等待（cron-job 错峰）：0~3600 秒，避免每次都在同一时刻打到 upfitapp。
+    _random_sleep(0, 3600, "启动前随机等待 (cron 错峰)")
     accounts = load_accounts()
     urls = get_urls()
 
