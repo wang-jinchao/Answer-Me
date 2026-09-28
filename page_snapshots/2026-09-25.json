@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-27",
+  "date": "2026-09-25",
   "sig": {
     "containers": {
       ".humanSociety-link": {
@@ -31,7 +31,7 @@
             "tag": "a",
             "cls": "humanSociety-linkAct",
             "text": "每日一看",
-            "href": "/aero/detnews?uuid=2425017257188980001",
+            "href": "/aero/detnews?uuid=2425017257188510022",
             "src": ""
           },
           {
@@ -112,7 +112,7 @@
             "src": ""
           }
         ],
-        "hash": "9f495c66946e67b313ea53c8ff774fb77bcba699554b8d609f01dade19a1e34b"
+        "hash": "99569295dd8a5fa4cf7f619e91524401a36f615ed9d165fff7e1f5588ca5f3db"
       },
       ".dailyActivityWarp": {
         "found": false,
