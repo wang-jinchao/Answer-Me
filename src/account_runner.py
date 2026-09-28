@@ -1501,8 +1501,11 @@ _CAPTURE_CONTAINERS_JS = r"""
   const norm = s => (s || '').replace(/<script[\s\S]*?<\/script>/gi, '')
                              .replace(/<style[\s\S]*?<\/style>/gi, '')
                              .replace(/\d{1,2}:\d{2}:\d{2}/g, '')
-                             .replace(/\d{4}-\d{2}-\d{2}/g, '')
-                             .replace(/\s+/g, ' ').trim();
+                         .replace(/\d{4}-\d{2}-\d{2}/g, '')
+                         // 剥掉每日文章入口的 uuid 查询参数 (?uuid=... / &uuid=...)，避免
+                         // 其每天轮换导致容器内容哈希误变、进而误报「页面变动」。
+                         .replace(/[?&]uuid=[^&"'`\s]*/g, '')
+                         .replace(/\s+/g, ' ').trim();
   const out = {};
   for (const sel of sels) {
     const host = document.querySelector(sel);
@@ -1597,10 +1600,25 @@ def _save_signature_today(sig):
         logger.warning('save page signature failed: %s', e)
 
 
+# 归一化链接：剥掉 ?uuid=... / &uuid=... 查询参数。
+# 用途：站点「每日一看」等每日文章入口的 uuid 每天轮换，但任务图标本身未变；
+# 若把 uuid 计入比对指纹，会每天误报「页面变动」。剥掉它后，同标题链接的
+# uuid 轮换不再触发告警，而路径/标题/结构的真实改动仍会被捕获。
+_UUID_PARAM_RE = re.compile(r'[?&]uuid=[^&\s"<>]+')
+
+
+def _norm_href(href):
+    if not href:
+        return href
+    return _UUID_PARAM_RE.sub('', href)
+
+
 def _item_key(x):
-    """把容器内的一个元素折成可比对的键：标签|类名|文本|链接|图片。"""
+    """把容器内的一个元素折成可比对的键：标签|类名|文本|链接|图片。
+    链接中的 uuid 查询参数已归一化（见 _norm_href），避免每日文章 uuid 轮换
+    造成误报。"""
     return '|'.join([str(x.get('tag') or ''), str(x.get('cls') or ''),
-                     str(x.get('text') or ''), str(x.get('href') or ''),
+                     str(x.get('text') or ''), _norm_href(str(x.get('href') or '')),
                      str(x.get('src') or '')])
 
 

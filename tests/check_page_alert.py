@@ -105,6 +105,21 @@ def main() -> int:
     a = diff(old, sig())
     cases.append(("旧基线无 containers → 不误报", a["changed"] is False))
 
+    # 8) 同标题链接的 uuid 每天轮换（如「每日一看」指向的每日文章）→ 不误报。
+    #    两个签名仅 每日一看 的 ?uuid= 不同，且容器内容哈希已归一化视为相同。
+    prev = sig(a_items=[item("a", "act", "每日一学", "/aero/detnews?uuid=2423417242993320009"),
+                        item("a", "act", "每日一看", "/aero/detnews?uuid=AAA")])
+    cur = sig(a_items=[item("a", "act", "每日一学", "/aero/detnews?uuid=2423417242993320009"),
+                       item("a", "act", "每日一看", "/aero/detnews?uuid=BBB")])
+    a = diff(prev, cur)
+    cases.append(("同标题链接 uuid 轮换 → 不误报", a["changed"] is False))
+
+    # 9) 同标题、uuid 也轮换，但「标题改名」是真实结构改动 → 仍告警。
+    prev = sig(a_items=[item("a", "act", "每日一看", "/aero/detnews?uuid=AAA")])
+    cur = sig(a_items=[item("a", "act", "每日阅读", "/aero/detnews?uuid=BBB")])
+    a = diff(prev, cur)
+    cases.append(("同链接但标题改名(含uuid轮换) → 仍告警", a["changed"] is True))
+
     print("校验页面变动告警口径（只看 humanSociety-link / dailyActivityWarp）")
     print("-" * 72)
     failed = 0
