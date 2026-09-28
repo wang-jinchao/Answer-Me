@@ -1398,7 +1398,7 @@ def _daily_refine(page, homepage_url):
     logger.info('每日一炼：活动页已打开（csrf 已取到），开始 %d 项运动上报', len(AI_SPORTS_EXERCISES))
     total_score = 0
     ok_count = 0
-    for ex in AI_SPORTS_EXERCISES:
+    for i, ex in enumerate(AI_SPORTS_EXERCISES):
         name = AI_SPORTS_NAMES.get(ex, ex)
         rec = {'exercise': ex, 'name': name, 'status': 'failed'}
         try:
@@ -1462,6 +1462,10 @@ def _daily_refine(page, homepage_url):
         # 照原脚本 run_full_day()：项与项之间 sleep(1.5)。原脚本是 1.5s，
         # 这里曾写成 1.0s，属与原脚本的最后一处偏差，为逐行对齐改回 1.5。
         time.sleep(1.5)
+        # 2026-09-28 用户要求：各项之间再随机等待 2~5 分钟，错峰降低被风控/限流概率。
+        # 仅在前 4 项之后等待，最后一项（第 5 项）上报完即结束，不再空等。
+        if i < len(AI_SPORTS_EXERCISES) - 1:
+            _random_sleep(120, 300, "每日一炼 各项之间随机等待")
 
     details['score'] = total_score
     logger.info('每日一炼 汇总: total_score=%s ok=%s/%s', total_score, ok_count, len(AI_SPORTS_EXERCISES))
